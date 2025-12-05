@@ -92,7 +92,6 @@ return array(
         'options' => array(
             'CARD' => __('信用卡'),
             'ATM' => __('ATM'),
-            'EACH' => __('銀行支付'),
             'IPL7' => __('7-11超商取貨'),
             'IPPI' => __('拍錢包'),
         )
