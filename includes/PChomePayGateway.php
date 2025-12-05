@@ -19,6 +19,7 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
 
     public $app_id;
     public $secret;
+    public $sandbox_app_id;
     public $sandbox_secret;
     public $atm_expiredate;
     public $test_mode;
@@ -40,7 +41,7 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
         $this->icon = apply_filters('woocommerce_pchomepay_icon', plugins_url('images/pchomepay_logo.png', dirname(__FILE__)));
         $this->has_fields = false;
         $this->method_title = __('PChomePay支付連', 'woocommerce');
-        $this->method_description = '透過 PChomePay支付連 付款，會連結到 PChomePay支付連 付款頁面。';
+        $this->method_description = '透過 PChomePay支付連 進行付款。';
         $this->supports = array('products', 'refunds');
 
         $this->init_form_fields();
@@ -52,6 +53,7 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
         $this->description = $this->get_option('description');
         $this->app_id = trim($this->get_option('app_id'));
         $this->secret = trim($this->get_option('secret'));
+        $this->sandbox_app_id = trim($this->get_option('sandbox_app_id'));
         $this->sandbox_secret = trim($this->get_option('sandbox_secret'));
         $this->atm_expiredate = $this->get_option('atm_expiredate');
         // Test Mode
@@ -60,20 +62,49 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
         $this->notify_url = WC()->api_request_url(get_class($this));
         $this->payment_methods = $this->get_option('payment_methods');
         $this->card_installment = $this->get_option('card_installment');
-        $this->card_last_number = ($this->get_option('card_last_number') === 'yes') ? true : false;
+        $this->card_last_number = true; // 顯示信用卡後四碼 更改為標配 故寫死 true 而非取 option
 
         self::$customize_order_received_text = $this->get_option('customize_order_received_text');
         self::$log_enabled = $this->debug;
 
+        $app_id = $this->test_mode ? $this->sandbox_app_id : $this->app_id;
+        $secret = $this->test_mode ? $this->sandbox_secret : $this->secret;
+        $sandbox_secret = $secret;
+
         if (empty($this->app_id) || empty($this->secret)) {
             $this->enabled = false;
         } else {
-            $this->client = new PChomePayClient($this->app_id, $this->secret, $this->sandbox_secret, $this->test_mode, self::$log_enabled);
+            $this->client = new PChomePayClient($app_id, $secret, $sandbox_secret, $this->test_mode, self::$log_enabled);
         }
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_' . strtolower(get_class($this)), array($this, 'receive_response'));
         add_filter( 'https_ssl_verify', '__return_false' );
+        add_action('init', function () {
+            add_rewrite_rule('^pchomepay-check-status/?$', 'index.php?pchomepay_check_status=1', 'top');
+            add_rewrite_tag('%pchomepay_check_status%', '1');
+            flush_rewrite_rules(false);
+        });
+        add_action('template_redirect', function () {
+            if (get_query_var('pchomepay_check_status') == 1) {
+                $pc_order_id = isset($_GET['pc_order_id']) ? sanitize_text_field($_GET['pc_order_id']) : null;
+
+                if ($pc_order_id) {
+                    $data = ['order_id' => [$pc_order_id]];
+                    $response = $this->client->post711LogisticBatch(json_encode($data, JSON_UNESCAPED_UNICODE));
+                    $print_url = $response->print_url ?? null;
+
+                    if ($print_url) {
+                        wp_redirect($print_url);
+                        exit;
+                    } else {
+                        wp_die('交寄單產生失敗，請稍後再試。');
+                    }
+                } else {
+                    wp_die('參數缺少，無法處理。');
+                }
+            }
+        });
     }
 
     public function init_form_fields()
@@ -84,6 +115,49 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
     public function admin_options()
     {
         parent::admin_options();
+        // 加入 JavaScript 來驗證 正式與測試 app_id & secret，這裡先不使用
+        // $this->pchomepay_admin_validation_script();
+    }
+
+    private function pchomepay_admin_validation_script()
+    {
+        ?>
+        <script type="text/javascript">
+            jQuery(document).ready(function($) {
+                $('#mainform').submit(function(event) {
+                    let isSandboxEnabled = $('#woocommerce_pchomepay_test_mode').is(':checked'); // 是否勾選測試模式
+                    let appId = $('#woocommerce_pchomepay_app_id').val().trim(); // 取得 app_id
+                    let secret = $('#woocommerce_pchomepay_secret').val().trim(); // 取得 secret
+                    let sandboxAppId = $('#woocommerce_pchomepay_sandbox_app_id').val().trim(); // 取得 sandbox_app_id
+                    let sandboxSecret = $('#woocommerce_pchomepay_sandbox_secret').val().trim(); // 取得 sandbox_secret
+
+                    if (!isSandboxEnabled && appId === '') {
+                        alert('測試模式已關閉，請填寫「正式環境 APP ID」！');
+                        event.preventDefault();
+                        return false;
+                    }
+
+                    if (!isSandboxEnabled && secret === '') {
+                        alert('測試模式已關閉，請填寫「正式環境 SECRET」！');
+                        event.preventDefault();
+                        return false;
+                    }
+
+                    if (isSandboxEnabled && sandboxAppId === '') {
+                        alert('測試模式已啟用，請填寫「測試環境 APP ID」！');
+                        event.preventDefault();
+                        return false;
+                    }
+
+                    if (isSandboxEnabled && sandboxSecret === '') {
+                        alert('測試模式已啟用，請填寫「測試環境 SECRET」！');
+                        event.preventDefault();
+                        return false;
+                    }
+                });
+            });
+        </script>
+        <?php
     }
 
 //    /**
@@ -110,6 +184,7 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
         global $woocommerce;
 
         $order_id = 'AW' . date('Ymd') . $order->get_order_number();
+        // $order_id = 'AW' . date('YmdHis') . $order->get_order_number();
         $pay_type = $this->payment_methods;
         $amount = ceil($order->get_total());
         $returnUrl = $this->get_return_url($order);
@@ -134,6 +209,12 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
                     break;
                 case 'CRD_12' :
                     $card_installment['installment'] = 12;
+                    break;
+                case 'CRD_18' :
+                    $card_installment['installment'] = 18;
+                    break;
+                case 'CRD_24' :
+                    $card_installment['installment'] = 24;
                     break;
                 default :
                     unset($card_installment);
@@ -182,7 +263,47 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
 
             $order = new WC_Order($order_id);
 
-            $pchomepay_args = json_encode($this->get_pchomepay_payment_data($order));
+            $pchomepay_args_array = $this->get_pchomepay_payment_data($order);
+            $amount = $pchomepay_args_array['amount'];
+            $pay_type = $pchomepay_args_array['pay_type'];
+
+            // CARD 金額上下限
+            if($amount < 30 || $amount > 199999) {
+                if (($key = array_search('CARD', $pchomepay_args_array['pay_type'])) !== false) {
+                    unset($pchomepay_args_array['pay_type'][$key]);
+                    $pchomepay_args_array['pay_type'] = array_values($pchomepay_args_array['pay_type']);
+                }
+            }
+            // ATM 金額上下限
+            if ($amount < 1 || $amount > 49999) {
+                if (($key = array_search('ATM', $pchomepay_args_array['pay_type'])) !== false) {
+                    unset($pchomepay_args_array['pay_type'][$key]);
+                    $pchomepay_args_array['pay_type'] = array_values($pchomepay_args_array['pay_type']);
+                }
+            }
+            // EACH 金額上下限
+            if ($amount < 1 || $amount > 49999) {
+                if (($key = array_search('EACH', $pchomepay_args_array['pay_type'])) !== false) {
+                    unset($pchomepay_args_array['pay_type'][$key]);
+                    $pchomepay_args_array['pay_type'] = array_values($pchomepay_args_array['pay_type']);
+                }
+            }
+            // IPL7 金額上下限
+            if ($amount < 65 || $amount > 20000) {
+                if (($key = array_search('IPL7', $pchomepay_args_array['pay_type'])) !== false) {
+                    unset($pchomepay_args_array['pay_type'][$key]);
+                    $pchomepay_args_array['pay_type'] = array_values($pchomepay_args_array['pay_type']);
+                }
+            }
+            // IPPI (拍錢包) 金額上下限
+            if ($amount < 1 || $amount > 199999) {
+                if (($key = array_search('IPPI', $pchomepay_args_array['pay_type'])) !== false) {
+                    unset($pchomepay_args_array['pay_type'][$key]);
+                    $pchomepay_args_array['pay_type'] = array_values($pchomepay_args_array['pay_type']);
+                }
+            }
+
+            $pchomepay_args = json_encode($pchomepay_args_array);
 
             if (!class_exists('PChomePayClient')) {
                 if (!require(dirname(__FILE__) . '/PChomePayClient.php')) {
@@ -244,7 +365,8 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
         }
 
         $order_data = json_decode(str_replace('\"', '"', $notify_message));
-        $wc_order_id = substr($order_data->order_id, 10);
+        $pc_order_id = $order_data->order_id;
+        $wc_order_id = substr($pc_order_id, 10);
         $order = new WC_Order($wc_order_id);
 
         # 紀錄訂單付款方式
@@ -273,10 +395,10 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
             case 'EACH':
                 $pay_type_note = '銀行支付 付款';
                 break;
-            case 'IPL7':
+            case '711':
                 $pay_type_note = '7-11超商 付款';
                 break;
-            case 'PI':
+            case 'IPPI':
                 $pay_type_note = 'PI拍錢包 付款';
                 break;
             default:
@@ -287,6 +409,7 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
             add_post_meta($wc_order_id, '_pchomepay_paytype', $order_data->pay_type);
         }
 
+
         if ($notify_type == 'order_audit') {
             if ($order_data->status_code === OrderStatusCodeEnum::ORDER_PENDING_CLIENT) {
                 $order->update_status('awaiting');
@@ -294,8 +417,42 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
                 $order->update_status('awaitingforpcpay');
             }
 
-            $order->add_order_note(sprintf(__('訂單交易等待中。<br>status code: %1$s<br>message: %2$s', 'woocommerce'), $order_data->status_code, OrderStatusCodeEnum::getErrMsg($order_data->status_code)), true);
-        } elseif ($notify_type == 'order_expired') {
+            // ATM 交易方式 在還沒付款完成前 需要另外顯示虛擬帳號
+            if ($order_data->pay_type === 'ATM') {
+                $getVirtualAccount = $order_data->payment_info->virtual_account;
+
+                $order->add_order_note(
+                    sprintf(
+                        __('訂單交易等待中。<br>status code: %1$s<br>message: %2$s<br>虛擬帳號: %3$s', 'woocommerce'),
+                        $order_data->status_code,
+                        OrderStatusCodeEnum::getErrMsg($order_data->status_code),
+                        $getVirtualAccount
+                    ),
+                    true
+                );
+            } else if ($order_data->pay_type === '711') {
+                $status_code = OrderStatusCodeEnum::WAITING_FOR_DISPATCH;
+                $url = add_query_arg('pc_order_id', $pc_order_id, site_url('/pchomepay-check-status'));
+                $order->add_order_note(
+                    sprintf(
+                        __('訂單交易等待中。<br>status code: %1$s<br>message: %2$s<br><a href="%3$s" target="_blank">列印交寄單</a>', 'woocommerce'),
+                        $status_code,
+                        OrderStatusCodeEnum::getErrMsg($status_code),
+                        esc_url($url)
+                    ),
+                    false
+                );
+            } else {
+                $order->add_order_note(
+                    sprintf(
+                        __('訂單交易等待中。<br>status code: %1$s<br>message: %2$s', 'woocommerce'),
+                        $order_data->status_code,
+                        OrderStatusCodeEnum::getErrMsg($order_data->status_code)
+                    ),
+                    true
+                );
+            }
+        } elseif ($notify_type == 'order_expired' || $notify_type == 'order_failed') {
             $order->add_order_note($pay_type_note, true);
             if ($order_data->status_code) {
                 $order->update_status('failed');
@@ -374,7 +531,7 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
 
             $payType = get_post_meta($order_id, '_pchomepay_paytype', true);
 
-            $version = (in_array($payType, ['IPL7', 'IPPI'])) ? 'v1' : 'v2';
+            $version = (in_array($payType, ['IPL7', 'IPPI', 'PI'])) ? 'v1' : 'v2'; // 根據經驗，多加個 'PI' 以防被陰
 
             // 退款
             $response_data = $this->client->postRefund($pchomepay_args, $version);
@@ -552,15 +709,22 @@ class WC_PI_Gateway_PChomePay extends WC_Gateway_PChomePay
         $this->enabled = $this->get_option('enabled');
         $this->has_fields = false;
         $this->method_title = __('PChomePay PI-拍錢包', 'woocommerce');
-        $this->method_description = '透過 PChomePay PI-拍錢包 付款，會連結到 PChomePay PI-拍錢包 付款頁面。';
+        $this->method_description = '透過 PChomePay 所提供之 Pi 拍錢包進行付款。';
 
         $this->init_form_fields();
         $this->init_settings();
 
+        $this->title = __('PChomePay PI-拍錢包', 'woocommerce');
+        $this->description = __('透過 PChomePay 所提供之 Pi 拍錢包進行付款。', 'woocommerce');
+
+        $app_id = $this->test_mode ? $this->sandbox_app_id : $this->app_id;
+        $secret = $this->test_mode ? $this->sandbox_secret : $this->secret;
+        $sandbox_secret = $secret;
+
         if (empty($this->app_id) || empty($this->secret)) {
             $this->enabled = false;
         } else {
-            $this->client = new PChomePayClient($this->app_id, $this->secret, $this->sandbox_secret, $this->test_mode, self::$log_enabled);
+            $this->client = new PChomePayClient($app_id, $secret, $sandbox_secret, $this->test_mode, self::$log_enabled);
         }
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
@@ -590,6 +754,7 @@ class WC_PI_Gateway_PChomePay extends WC_Gateway_PChomePay
         global $woocommerce;
 
         $order_id = 'AW' . date('Ymd') . $order->get_order_number();
+        // $order_id = 'AW' . date('YmdHis') . $order->get_order_number();
         $pay_type = ['PI'];
         $amount = ceil($order->get_total());
         $returnUrl = $this->get_return_url($order);
@@ -788,7 +953,7 @@ class WC_PI_Gateway_PChomePay extends WC_Gateway_PChomePay
 
             $payType = get_post_meta($order_id, '_pchomepay_paytype', true);
 
-            $version = (in_array($payType, ['IPL7', 'IPPI'])) ? 'v1' : 'v2';
+            $version = (in_array($payType, ['IPL7', 'IPPI', 'PI'])) ? 'v1' : 'v2'; // 根據經驗，多加個 'PI' 以防被陰
 
             // 退款
             $response_data = $this->client->postRefund($pchomepay_args, $version);

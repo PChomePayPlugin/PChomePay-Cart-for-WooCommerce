@@ -70,6 +70,9 @@ class OrderStatusCodeEnum
     /** 銀行支付 等待OTP驗證 */
     const EACH_ORDER_OTP_WAIT = "WO";
 
+    /** 銀行支付 等待OTP驗證 */
+    const WAITING_FOR_DISPATCH = "WD";
+
     public static function getErrMsg($code)
     {
         $msg = [
@@ -92,6 +95,7 @@ class OrderStatusCodeEnum
             static::ORDER_PENDING_PCHOMEPAY => '訂單於支付連審單中',
             static::ORDER_PENDING_CLIENT => '訂單審單中',
             static::EACH_ORDER_OTP_WAIT => '銀行支付 等待OTP驗證',
+            static::WAITING_FOR_DISPATCH => '超商取貨付款 等待商品交寄',
         ];
 
         return $msg[$code];

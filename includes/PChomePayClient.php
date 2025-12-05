@@ -29,6 +29,7 @@ class PChomePayClient
     private $postV2RefundURL;
     private $postPaymentAuditURL;
     private $get711HistoryPageURL;
+    private $post711LogisticBatchURL;
     private $tokenStorage;
 
     public function __construct($appID, $secret, $sandboxSecret, $sandBox = false, $debug = false)
@@ -46,6 +47,7 @@ class PChomePayClient
         $this->postV2RefundURL = $baseURL . "/v2/refund";
         $this->postPaymentAuditURL = $baseURL . "/v1/payment/audit";
         $this->get711HistoryPageURL = $baseURL . "/v1/logistic/query/{order_id}/history-page";
+        $this->post711LogisticBatchURL = $baseURL . "/v1/logistic/batch";
 
         $this->tokenStorage = new FileTokenStorage(null, $sandBox);
     }
@@ -99,6 +101,24 @@ class PChomePayClient
         }
 
         return $this->get_request(str_replace("{order_id}", $orderID, $this->get711HistoryPageURL));
+    }
+
+    public function post711LogisticBatch($data)
+    {
+        $token = $this->validateTokenExpiredIn();
+
+        $r = wp_remote_post($this->post711LogisticBatchURL, array(
+            'headers' => array(
+                'Content-type' => 'application/json',
+                'pcpay-token' => $token->token,
+            ),
+            'body' => $data,
+        ));
+
+        $body = wp_remote_retrieve_body($r);
+        $result = json_decode($body);
+
+        return $result;
     }
 
     // 取Token
