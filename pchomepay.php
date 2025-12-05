@@ -4,10 +4,10 @@
  *
  * Plugin Name: PChomePay Gateway for WooCommerce
  * Plugin URI: https://www.pchomepay.com.tw
- * Description: 讓 WooCommerce 可以使用 PChomePay支付連 進行結帳！水啦！！
- * Version: 1.6.3
- * Author: PChomePay支付連
- * Author URI: https://www.pchomepay.com.tw
+ * Description: 讓 WooCommerce 可以使用 PChomePay支付連 提供之付款方式進行結帳。
+ * Version: 2.0.3
+ * Author: PChomePay支付連 WooCommerce操作指南
+ * Author URI: https://docs.google.com/document/d/1ItCUQvY0A4VeVAlOdAMbt48lKB-xlNVZCu7E6L9d0Mg/edit
  */
 
 defined('ABSPATH') || exit;
@@ -48,6 +48,59 @@ function pchomepay_gateway_init()
     }
 
     add_filter('woocommerce_thankyou_order_received_text', 'customize_order_received_text', 10, 2);
+
+    function declare_cart_checkout_blocks_compatibility() {
+        if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
+            \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('cart_checkout_blocks', __FILE__, true);
+        }
+    }
+
+    add_action('before_woocommerce_init', 'declare_cart_checkout_blocks_compatibility');
+
+    function pchomepay_register_order_approval_payment_method_type() {
+        if ( ! class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
+            return;
+        }
+
+        require_once 'includes/pchomepayClassBlock.php';
+        add_action(
+            'woocommerce_blocks_payment_method_type_registration',
+            function( Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry ) {
+                $payment_method_registry->register( new Pchomepay_Gateway_Blocks );
+            }
+        );
+    }
+
+    add_action( 'woocommerce_blocks_loaded', 'pchomepay_register_order_approval_payment_method_type' );
+
+    function pchomepay_pi_register_order_approval_payment_method_type() {
+        if ( ! class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
+            return;
+        }
+
+        require_once 'includes/pchomepayPiClassBlock.php';
+        add_action(
+            'woocommerce_blocks_payment_method_type_registration',
+            function( Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry ) {
+                $payment_method_registry->register( new PchomepayPi_Gateway_Blocks );
+            }
+        );
+    }
+
+    add_action( 'woocommerce_blocks_loaded', 'pchomepay_pi_register_order_approval_payment_method_type' );
+
+    function checkout_enqueue_scripts() {
+        wp_enqueue_script('pchomepayCheckout', plugin_dir_url(__FILE__) . 'include/pchomepayCheckout.js', array('wp-element'), '1.0', true);
+        wp_localize_script('pchomepayCheckout', 'myImagePath', array(
+            'pluginPath' => plugin_dir_url(__FILE__) . 'images/'
+        ));
+
+        wp_enqueue_script('pchomepayPiCheckout', plugin_dir_url(__FILE__) . 'include/pchomepayPiCheckout.js', array('wp-element'), '1.0', true);
+        wp_localize_script('pchomepayPiCheckout', 'myImagePath', array(
+            'pluginPath' => plugin_dir_url(__FILE__) . 'images/'
+        ));
+    }
+    add_action('wp_enqueue_scripts', 'checkout_enqueue_scripts');
 }
 
 add_action('init', 'pchomepay_plugin_updater_init');
@@ -62,14 +115,14 @@ function pchomepay_plugin_updater_init()
 
         $config = array(
             'slug' => plugin_basename(__FILE__),
-            'proper_folder_name' => 'PCHomePay-for-WooCommerce-master',
-            'api_url' => 'https://api.github.com/repos/PChomePay/PChomePay-for-WooCommerce',
-            'raw_url' => 'https://raw.github.com/PChomePay/PChomePay-for-WooCommerce/master',
-            'github_url' => 'https://github.com/PChomePay/PChomePay-for-WooCommerce',
-            'zip_url' => 'https://github.com/PChomePay/PChomePay-for-WooCommerce/archive/master.zip',
+            'proper_folder_name' => basename(plugin_dir_path(__FILE__)),
+            'api_url' => 'https://api.github.com/repos/PChomePayPlugin/PChomePay-Cart-for-WooCommerce',
+            'raw_url' => 'https://raw.github.com/PChomePayPlugin/PChomePay-Cart-for-WooCommerce/main',
+            'github_url' => 'https://github.com/PChomePayPlugin/PChomePay-Cart-for-WooCommerce',
+            'zip_url' => 'https://github.com/PChomePayPlugin/PChomePay-Cart-for-WooCommerce/archive/main.zip',
             'sslverify' => true,
-            'requires' => '3.0',
-            'tested' => '4.8',
+            'requires' => '6.4',
+            'tested' => '6.4',
             'readme' => 'README.md',
             'access_token' => '',
         );
@@ -127,65 +180,67 @@ function pchomepay_audit_order_deny($order)
     }
 }
 
+// 2024/08/28 暫時看不出實際作用 先隱藏 "等待審單" "等待支付連審單" 這一大段 如果之後發現有問題再重新打開
+//// Add to list of WC Order statuses
+//add_action('init', 'register_awaiting_audit_order_status');
+//
+//function register_awaiting_audit_order_status()
+//{
+//    register_post_status('wc-awaiting', array(
+//        'label' => '等待審單',
+//        'public' => true,
+//        'exclude_from_search' => false,
+//        'show_in_admin_all_list' => true,
+//        'show_in_admin_status_list' => true,
+//        'label_count' => _n_noop('等待審單 <span class="count">(%s)</span>', '等待審單 <span class="count">(%s)</span>')
+//    ));
+//}
+//
+//add_filter('wc_order_statuses', 'add_awaiting_audit_order_statuses');
+//
+//function add_awaiting_audit_order_statuses($order_statuses)
+//{
+//    $new_order_statuses = array();
+//    // add new order status after processing
+//    foreach ($order_statuses as $key => $status) {
+//        $new_order_statuses[$key] = $status;
+//        if ('wc-processing' === $key) {
+//            $new_order_statuses['wc-awaiting'] = '等待審單';
+//        }
+//    }
+//    return $new_order_statuses;
+//}
+
 // Add to list of WC Order statuses
-add_action('init', 'register_awaiting_audit_order_status');
-
-function register_awaiting_audit_order_status()
-{
-    register_post_status('wc-awaiting', array(
-        'label' => '等待審單',
-        'public' => true,
-        'exclude_from_search' => false,
-        'show_in_admin_all_list' => true,
-        'show_in_admin_status_list' => true,
-        'label_count' => _n_noop('等待審單 <span class="count">(%s)</span>', '等待審單 <span class="count">(%s)</span>')
-    ));
-}
-
-add_filter('wc_order_statuses', 'add_awaiting_audit_order_statuses');
-
-function add_awaiting_audit_order_statuses($order_statuses)
-{
-    $new_order_statuses = array();
-    // add new order status after processing
-    foreach ($order_statuses as $key => $status) {
-        $new_order_statuses[$key] = $status;
-        if ('wc-processing' === $key) {
-            $new_order_statuses['wc-awaiting'] = '等待審單';
-        }
-    }
-    return $new_order_statuses;
-}
-
-// Add to list of WC Order statuses
-add_action('init', 'register_awaiting_pchomepay_audit_order_status');
-
-function register_awaiting_pchomepay_audit_order_status()
-{
-    register_post_status('wc-awaitingforpcpay', array(
-        'label' => '等待支付連審單',
-        'public' => true,
-        'exclude_from_search' => false,
-        'show_in_admin_all_list' => true,
-        'show_in_admin_status_list' => true,
-        'label_count' => _n_noop('等待支付連審單 <span class="count">(%s)</span>', '等待支付連審單 <span class="count">(%s)</span>')
-    ));
-}
-
-add_filter('wc_order_statuses', 'add_awaiting_pchomepay_audit_order_statuses');
-
-function add_awaiting_pchomepay_audit_order_statuses($order_statuses)
-{
-    $new_order_statuses = array();
-    // add new order status after processing
-    foreach ($order_statuses as $key => $status) {
-        $new_order_statuses[$key] = $status;
-        if ('wc-processing' === $key) {
-            $new_order_statuses['wc-awaitingforpcpay'] = '等待支付連審單';
-        }
-    }
-    return $new_order_statuses;
-}
+//add_action('init', 'register_awaiting_pchomepay_audit_order_status');
+//
+//function register_awaiting_pchomepay_audit_order_status()
+//{
+//    register_post_status('wc-awaitingforpcpay', array(
+//        'label' => '等待支付連審單',
+//        'public' => true,
+//        'exclude_from_search' => false,
+//        'show_in_admin_all_list' => true,
+//        'show_in_admin_status_list' => true,
+//        'label_count' => _n_noop('等待支付連審單 <span class="count">(%s)</span>', '等待支付連審單 <span class="count">(%s)</span>')
+//    ));
+//}
+//
+//add_filter('wc_order_statuses', 'add_awaiting_pchomepay_audit_order_statuses');
+//
+//function add_awaiting_pchomepay_audit_order_statuses($order_statuses)
+//{
+//    $new_order_statuses = array();
+//    // add new order status after processing
+//    foreach ($order_statuses as $key => $status) {
+//        $new_order_statuses[$key] = $status;
+//        if ('wc-processing' === $key) {
+//            $new_order_statuses['wc-awaitingforpcpay'] = '等待支付連審單';
+//        }
+//    }
+//    return $new_order_statuses;
+//}
+// 2024/08/28 暫時看不出實際作用 先隱藏 "等待審單" "等待支付連審單" 這一大段 如果之後發現有問題再重新打開
 
 // 顧客訂單頁面 7-11物流歷程查詢
 add_filter( 'woocommerce_my_account_my_orders_actions', 'add_my_account_my_orders_custom_action', 10, 2 );
