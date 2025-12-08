@@ -392,9 +392,6 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
             case 'ACCT':
                 $pay_type_note = '支付連餘額 付款';
                 break;
-            case 'EACH':
-                $pay_type_note = '銀行支付 付款';
-                break;
             case '711':
                 $pay_type_note = '7-11超商 付款';
                 break;
