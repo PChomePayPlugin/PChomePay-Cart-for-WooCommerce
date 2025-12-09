@@ -155,7 +155,6 @@ class WP_GitHub_Updater
             $this->config['zip_url'] = $zip_url;
         }
 
-        delete_site_transient('update_plugins');
 
         if (!isset($this->config['new_version']))
             $this->config['new_version'] = $this->get_new_version();
