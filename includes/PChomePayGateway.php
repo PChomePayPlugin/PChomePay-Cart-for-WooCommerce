@@ -114,9 +114,76 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
 
     public function admin_options()
     {
+        $this->render_version_update_notice();
         parent::admin_options();
+        
         // 加入 JavaScript 來驗證 正式與測試 app_id & secret，這裡先不使用
         // $this->pchomepay_admin_validation_script();
+    }
+
+    /**
+     * 於付款設定頁頂部輸出 GitHub 新版本提示橫幅
+     *
+     * 該實例建構時即已取得兩個版本號，此處不另外對 GitHub 發出請求。
+     * 版號一致、已安裝版本較新、或任一版本號取不到時，皆不輸出任何內容。
+     *
+     * @return void
+     */
+    private function render_version_update_notice()
+    {
+        $updater = pchomepay_get_plugin_updater();
+        if (!$updater instanceof WP_GitHub_Updater) {
+            return;
+        }
+
+        // GitHub 取版本失敗時 new_version 為 false，轉字串後即為空字串
+        $installed_version = (string)($updater->config['version'] ?? '');
+        $github_version = (string)($updater->config['new_version'] ?? '');
+        if ($installed_version === '' || $github_version === '') {
+            return;
+        }
+
+        // GitHub 版本較新才提示
+        if (version_compare($github_version, $installed_version) !== 1) {
+            return;
+        }
+
+        $github_url = 'https://github.com/PChomePayPlugin';
+        ?>
+        <div style="background: #fff8e5; border-left: 4px solid #f0c36d; border-radius: 0 3px 3px 0; box-shadow: 0 1px 1px rgba(0, 0, 0, .04); margin: 0 0 20px; padding: 12px 16px;">
+            <div style="display: flex; align-items: flex-start; gap: 10px;">
+                <span class="dashicons dashicons-warning" style="color: #b26200; flex-shrink: 0; margin-top: 2px;"></span>
+                <div>
+                    <h3 style="margin: 0 0 6px; font-size: 14px; color: #1d2327;">
+                        <?php echo esc_html__('PChomePay Gateway for WooCommerce 有可用的新版本！', 'woocommerce'); ?>
+                        <span style="display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 9px; background: #d63638; color: #fff; font-size: 10px; vertical-align: middle;">
+                            <?php echo esc_html__('可升級', 'woocommerce'); ?>
+                        </span>
+                    </h3>
+                    <p style="margin: 0 0 10px; color: #2c3338;">
+                        <?php
+                        printf(
+                            esc_html__(
+                                '您目前的安裝版本為 v%1$s， GitHub 上已有最新版本 v%2$s。 建議您盡快升級以獲得最新的功能更新與安全修復。',
+                                'woocommerce'
+                            ),
+                            esc_html($installed_version),
+                            esc_html($github_version)
+                        );
+                        ?>
+                    </p>
+                    <p style="margin: 0;">
+                        <a href="<?php echo esc_url($github_url); ?>"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           class="button button-primary">
+                            <?php echo esc_html__('前往 GitHub 下載最新版本', 'woocommerce'); ?>
+                        </a>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <?php
     }
 
     private function pchomepay_admin_validation_script()
@@ -268,11 +335,15 @@ class WC_Gateway_PChomePay extends WC_Payment_Gateway
             $pay_type = $pchomepay_args_array['pay_type'];
 
             // CARD 金額上下限
-            if($amount < 30 || $amount > 199999) {
+            if ($amount < 1 || $amount > 199999) {
                 if (($key = array_search('CARD', $pchomepay_args_array['pay_type'])) !== false) {
                     unset($pchomepay_args_array['pay_type'][$key]);
                     $pchomepay_args_array['pay_type'] = array_values($pchomepay_args_array['pay_type']);
                 }
+            }
+            // 信用卡分期金額下限：未達 30 元的訂單不提供分期，僅提供一次付清
+            if ($amount < 30) {
+                unset($pchomepay_args_array['card_info']);
             }
             // ATM 金額上下限
             if ($amount < 1 || $amount > 49999) {
